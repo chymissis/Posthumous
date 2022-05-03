@@ -5,7 +5,7 @@
 #include "PHCharacter.generated.h"
 
 UENUM()
-enum class EMovementState
+enum class EMovementState : uint8
 {
 	None,
 	Climbing,
@@ -17,11 +17,25 @@ enum class EMovementState
 };
 
 UENUM()
-enum class ERotationMode
+enum class ERotationMode : uint8
 {
 	CameraDirection,
 	VelocityDirection
 };
+
+USTRUCT()
+struct FPHMantleEndTransform
+{
+	GENERATED_USTRUCT_BODY()
+
+	FTransform MantleUpTransform;
+	FTransform MantleForwardTransform;
+	FTransform ComponentTransform;
+
+	UPrimitiveComponent* Component;
+};
+
+enum class EMantleType : uint8;
 
 UCLASS()
 class POSTHUMOUS_API APHCharacter : public ACharacter
@@ -38,7 +52,8 @@ protected:
 
 private:
 	void OnMovementModeChanged(EMovementMode PrevMovementMode, EMovementMode NewMovementMode);
-	void ChangeMovementState(EMovementState InMovementState);
+	UFUNCTION(Server, Reliable)
+	void ServerChangeMovementState(EMovementState InMovementState);
 	void SpawnGlider();
 	void ApplyMovementState();
 
@@ -87,12 +102,17 @@ private:
 	float SavedBrakingDecelerationWalking;
 	float SavedFallingLateralFriction;
 	float SavedGroundFriction;
+	float MantleHeight;
 
 	UPROPERTY(Replicated)
 	EMovementState MovementState;
 
 	UPROPERTY(ReplicatedUsing = OnRepRotationMode)
 	ERotationMode RotationMode;
+
+	UPROPERTY()
+	EMantleType MantleType;
+	FPHMantleEndTransform MantleEndTransform;
 
 	UPROPERTY()
 	class UPHCharacterData* CharacterData;

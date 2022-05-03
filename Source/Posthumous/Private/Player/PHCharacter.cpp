@@ -1,6 +1,7 @@
 #include "Player/PHCharacter.h"
 #include "Data/PHCharacterData.h"
 
+#include "Animation/AnimMontage.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -95,17 +96,17 @@ void APHCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, EMoveme
 	{
 	case EMovementMode::MOVE_Walking:
 	case EMovementMode::MOVE_NavWalking:
-		ChangeMovementState(EMovementState::Ground);
+		ServerChangeMovementState(EMovementState::Ground);
 		return;
 	case EMovementMode::MOVE_Falling:
-		ChangeMovementState(EMovementState::Falling);
+		ServerChangeMovementState(EMovementState::Falling);
 		return;
 	case EMovementMode::MOVE_Swimming:
-		ChangeMovementState(EMovementState::Swimming);
+		ServerChangeMovementState(EMovementState::Swimming);
 	}
 }
 
-void APHCharacter::ChangeMovementState(EMovementState InMovementState)
+void APHCharacter::ServerChangeMovementState_Implementation(EMovementState InMovementState)
 {
 	if (MovementState == InMovementState || !CharacterData)
 		return;
@@ -267,10 +268,32 @@ void APHCharacter::OnRepSprinting()
 
 void APHCharacter::StartMantle()
 {
-	if (CharacterData && CharacterData->MantleDisabledCollision)
+	if (!CharacterData)
+		return;
+
+	if (CharacterData->bMantleDisabledCollision)
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	auto* MantleParam = CharacterData->MantleParamMap.Find(MantleType);
+	auto* AnimInstance = GetMesh()->GetAnimInstance();
 
+	if (!MantleParam || !MantleParam->Montage || !AnimInstance)
+		return;
+
+	float MontageStartPosition = MantleParam->Montage->GetPlayLength() * UKismetMathLibrary::MapRangeClamped(MantleHeight, MantleParam->MaxHeight, MantleParam->MinHeight, MantleParam->MaxHeightTime, MantleParam->MinHeightTime);
+	AnimInstance->Montage_Play(MantleParam->Montage, CharacterData->MantlePlayRate, EMontagePlayReturnType::MontageLength, MontageStartPosition, true);
+
+	FVector NewLocation = GetActorLocation() + ((MantleEndTransform.MantleForwardTransform * MantleEndTransform.ComponentTransform).GetRotation().GetForwardVector() * -5.f);
+	FHitResult OutSweepHitResult;
+	SetActorLocation(NewLocation, false, &OutSweepHitResult, ETeleportType::TeleportPhysics);
+
+	// Move Actor To
+
+	if (CharacterData->bMantleDisabledCollision)
+		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+	bMantle = false;
+	ServerChangeMovementState(EMovementState::Ground);
 }
 
 void APHCharacter::ChangeMaxSpeed()
