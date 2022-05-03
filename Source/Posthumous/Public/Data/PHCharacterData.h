@@ -4,6 +4,32 @@
 #include "Engine/DataAsset.h"
 #include "PHCharacterData.generated.h"
 
+UENUM()
+enum class EMantleType : uint8
+{
+	High_1,
+	High_2,
+	StepUp
+};
+
+USTRUCT()
+struct FPHMantleParam
+{
+	GENERATED_USTRUCT_BODY()
+
+	bool bKeepRotation;
+
+	float MaxHeight;
+	float MinHeight;
+	float MaxHeightTime;
+	float MinHeightTime;
+	float MoveForwardTime;
+	float ForwardDistance;
+
+	UPROPERTY()
+	class UAnimMontage* Montage;
+};
+
 UCLASS()
 class POSTHUMOUS_API UPHCharacterData : public UDataAsset
 {
@@ -53,7 +79,10 @@ public:
 	float MaxWalkingSpeed;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Mantle")
-	bool bMantleDisabledCollision;
+	TMap<EMantleType, FPHMantleParam> MantleParamMap;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Mantle")
+	float MantlePlayRate;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Swimming")
 	float MaxSwimmingSpeed;
@@ -66,6 +95,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Swimming")
 	float SwimmingSprintSpeed;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Option")
+	bool bMantleDisabledCollision;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Option")
 	bool bPersistentWalking;
