@@ -52,24 +52,28 @@ protected:
 
 private:
 	void OnMovementModeChanged(EMovementMode PrevMovementMode, EMovementMode NewMovementMode);
+	void ChangeMovementState(EMovementState InMovementState);
 	UFUNCTION(Server, Reliable)
 	void ServerChangeMovementState(EMovementState InMovementState);
-	void SpawnGlider();
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastChangeMovementState(EMovementState InMovementState);
 	void ApplyMovementState();
 
 	void TurnOffWalkingAndSprinting();
+	
 	UFUNCTION(Server, Reliable)
 	void ServerSetWalking(bool bInWalking);
 	UFUNCTION()
 	void OnRepWalking() { ChangeMaxSpeed(); }
+	
 	UFUNCTION(Server, Reliable)
 	void ServerSetSprinting(bool bInSprinting);
 	UFUNCTION()
 	void OnRepSprinting();
 	
-	void StartMantle();
-
 	void ChangeMaxSpeed();
+	
+	void StartMantle();
 
 	UFUNCTION()
 	void OnRepRotationMode() { SwitchRotationSetting(); }
@@ -79,7 +83,31 @@ private:
 	void MoveRight(const float AxisValue);
 
 	void TogglePerspective();
+
 	void Jumping();
+	
+	void CheckJumpingToClimb();
+	
+	void JumpToClimb(const FVector& JumpOrientation);
+	UFUNCTION(Server, Reliable)
+	void ServerJumpToClimb(const FVector& JumpOrientation);
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastJumpToClimb(const FVector& JumpOrientation);
+	
+	void JumpOffWhileClimbing(const FVector& JumpOrientation);
+	UFUNCTION(Server, Reliable)
+	void ServerJumpOffWhileClimbing(const FVector& JumpOrientation);
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastJumpOffWhileClimbing(const FVector& JumpOrientation);
+
+	void JumpWhileSlidingOnSlope(const FVector& LaunchVelocity);
+	UFUNCTION(Server, Reliable)
+	void ServerJumpWhileSlidingOnSlope(const FVector& LaunchVelocity);
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastJumpWhileSlidingOnSlope(const FVector& LaunchVelocity);
+
+	bool CanGlide();
+	void SpawnGlider();
 
 private:
 	UPROPERTY(ReplicatedUsing = OnRepWalking)
@@ -95,6 +123,7 @@ private:
 	bool bClimbingFromAbove;
 	bool bJumpingToClimb;
 	bool bMantle;
+	bool bSlidingCrouched;
 	bool bSlidingOnSlope;
 	bool bUsingFpView = true;
 

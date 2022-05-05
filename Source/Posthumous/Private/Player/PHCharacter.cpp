@@ -60,13 +60,6 @@ void APHCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	PlayerInputComponent->BindAction(TEXT("Jump"), IE_Released, this, &APHCharacter::StopJumping);
 }
 
-void APHCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
-{
-	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
-
-	OnMovementModeChanged(PrevMovementMode, GetCharacterMovement()->MovementMode);
-}
-
 void APHCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -75,6 +68,13 @@ void APHCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(APHCharacter, bSprinting);
 	DOREPLIFETIME(APHCharacter, MovementState);
 	DOREPLIFETIME(APHCharacter, RotationMode);
+}
+
+void APHCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
+
+	OnMovementModeChanged(PrevMovementMode, GetCharacterMovement()->MovementMode);
 }
 
 void APHCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, EMovementMode NewMovementMode)
@@ -96,17 +96,17 @@ void APHCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, EMoveme
 	{
 	case EMovementMode::MOVE_Walking:
 	case EMovementMode::MOVE_NavWalking:
-		ServerChangeMovementState(EMovementState::Ground);
+		ChangeMovementState(EMovementState::Ground);
 		return;
 	case EMovementMode::MOVE_Falling:
-		ServerChangeMovementState(EMovementState::Falling);
+		ChangeMovementState(EMovementState::Falling);
 		return;
 	case EMovementMode::MOVE_Swimming:
-		ServerChangeMovementState(EMovementState::Swimming);
+		ChangeMovementState(EMovementState::Swimming);
 	}
 }
 
-void APHCharacter::ServerChangeMovementState_Implementation(EMovementState InMovementState)
+void APHCharacter::ChangeMovementState(EMovementState InMovementState)
 {
 	if (MovementState == InMovementState || !CharacterData)
 		return;
@@ -140,19 +140,15 @@ void APHCharacter::ServerChangeMovementState_Implementation(EMovementState InMov
 	ApplyMovementState();
 }
 
-void APHCharacter::SpawnGlider()
+void APHCharacter::ServerChangeMovementState_Implementation(EMovementState InMovementState)
 {
-	if (MovementState != EMovementState::Gliding || !CharacterData || CharacterData->Glider.IsNull() || !GetWorld())
-		return;
+	MulticastChangeMovementState(InMovementState);
+}
 
-	FVector Location;
-	FRotator Rotation;
-	FActorSpawnParameters ActorSpawnParameters;
-	ActorSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-	Glider = GetWorld()->SpawnActor(CharacterData->Glider.Get(), &Location, &Rotation, ActorSpawnParameters);
-	if (Glider)
-		Glider->K2_AttachToComponent(GetMesh(), TEXT("GliderSocket"), EAttachmentRule::KeepRelative, EAttachmentRule::KeepRelative, EAttachmentRule::KeepRelative, true);
+void APHCharacter::MulticastChangeMovementState_Implementation(EMovementState InMovementState)
+{
+	if (!IsLocallyControlled() && MovementState != InMovementState)
+		ChangeMovementState(InMovementState);
 }
 
 void APHCharacter::ApplyMovementState()
@@ -218,7 +214,6 @@ void APHCharacter::ApplyMovementState()
 		return;
 	}
 	case EMovementState::Swimming:
-	{
 		if (GetCharacterMovement()->MovementMode != EMovementMode::MOVE_Falling)
 			GetCharacterMovement()->SetMovementMode(EMovementMode::MOVE_Falling, 0);
 
@@ -226,7 +221,6 @@ void APHCharacter::ApplyMovementState()
 		GetCharacterMovement()->MaxAcceleration = CharacterData->SwimmingMaxAcceleration;
 		UnCrouch();
 		GetCharacterMovement()->Velocity = FVector(0.f, 0.f, GetCharacterMovement()->Velocity.Z);
-	}
 	}
 }
 
@@ -266,6 +260,26 @@ void APHCharacter::OnRepSprinting()
 		SwitchRotationSetting();
 }
 
+void APHCharacter::ChangeMaxSpeed()
+{
+	if (!CharacterData)
+		return;
+
+	switch (MovementState)
+	{
+	case EMovementState::Climbing:
+		GetCharacterMovement()->MaxFlySpeed = CharacterData->MaxClimbingSpeed;
+		return;
+	case EMovementState::Falling:
+	case EMovementState::Gliding:
+	case EMovementState::Ground:
+		GetCharacterMovement()->MaxWalkSpeed = bSprinting ? CharacterData->MaxSprintingSpeed : (bWalking ? CharacterData->MaxWalkingSpeed : CharacterData->MaxRunningSpeed);
+		return;
+	case EMovementState::Swimming:
+		GetCharacterMovement()->MaxSwimSpeed = bSprinting ? CharacterData->SwimmingSprintSpeed : CharacterData->MaxSwimmingSpeed;
+	}
+}
+
 void APHCharacter::StartMantle()
 {
 	if (!CharacterData)
@@ -281,39 +295,57 @@ void APHCharacter::StartMantle()
 		return;
 
 	float MontageStartPosition = MantleParam->Montage->GetPlayLength() * UKismetMathLibrary::MapRangeClamped(MantleHeight, MantleParam->MaxHeight, MantleParam->MinHeight, MantleParam->MaxHeightTime, MantleParam->MinHeightTime);
-	AnimInstance->Montage_Play(MantleParam->Montage, CharacterData->MantlePlayRate, EMontagePlayReturnType::MontageLength, MontageStartPosition, true);
+	float MontageTimeLength = AnimInstance->Montage_Play(MantleParam->Montage, CharacterData->MantlePlayRate, EMontagePlayReturnType::MontageLength, MontageStartPosition, true);
 
 	FVector NewLocation = GetActorLocation() + ((MantleEndTransform.MantleForwardTransform * MantleEndTransform.ComponentTransform).GetRotation().GetForwardVector() * -5.f);
 	FHitResult OutSweepHitResult;
 	SetActorLocation(NewLocation, false, &OutSweepHitResult, ETeleportType::TeleportPhysics);
 
-	// Move Actor To
+	FTransform NewTransform_1 = MantleEndTransform.MantleUpTransform * (MantleEndTransform.Component ? MantleEndTransform.Component->GetComponentTransform() : MantleEndTransform.ComponentTransform);
+	FTransform NewTransform_2 = MantleEndTransform.MantleForwardTransform * (MantleEndTransform.Component ? MantleEndTransform.Component->GetComponentTransform() : MantleEndTransform.ComponentTransform);
+	float OverTime_1 = (MantleParam->MoveForwardTime - MontageStartPosition) / CharacterData->MantlePlayRate;
+	float OverTime_2 = (MontageTimeLength - MantleParam->MoveForwardTime) / CharacterData->MantlePlayRate;
+
+	if (OverTime_1 > 0.f && GetWorld())
+	{
+		FTimerHandle TimerHandle;
+		float WorldDeltaSeconds = 0.f;
+
+		do
+		{
+			FVector DeltaLocation = UKismetMathLibrary::VLerp(GetActorLocation(), NewTransform_1.GetLocation(), WorldDeltaSeconds / OverTime_1);
+			FRotator DeltaRotation = UKismetMathLibrary::RLerp(GetActorRotation(), NewTransform_1.GetRotation().Rotator(), WorldDeltaSeconds / OverTime_1, true);
+			SetActorLocationAndRotation(DeltaLocation, DeltaRotation, true, &OutSweepHitResult, ETeleportType::None);
+			WorldDeltaSeconds += UKismetMathLibrary::Clamp(WorldDeltaSeconds + UGameplayStatics::GetWorldDeltaSeconds(this), 0.f, OverTime_1);
+		}
+		while (WorldDeltaSeconds < OverTime_1);
+	}
+	else
+		SetActorLocationAndRotation(NewTransform_1.GetLocation(), NewTransform_1.GetRotation().Rotator(), true, &OutSweepHitResult, ETeleportType::None);
+
+	if (OverTime_2 > 0.f)
+	{
+		FTimerHandle TimerHandle;
+		float WorldDeltaSeconds = 0.f;
+
+		do
+		{
+			FVector DeltaLocation = UKismetMathLibrary::VLerp(GetActorLocation(), NewTransform_2.GetLocation(), WorldDeltaSeconds / OverTime_2);
+			FRotator DeltaRotation = UKismetMathLibrary::RLerp(GetActorRotation(), NewTransform_2.GetRotation().Rotator(), WorldDeltaSeconds / OverTime_2, true);
+			SetActorLocationAndRotation(DeltaLocation, DeltaRotation, true, &OutSweepHitResult, ETeleportType::None);
+			WorldDeltaSeconds += UKismetMathLibrary::Clamp(WorldDeltaSeconds + UGameplayStatics::GetWorldDeltaSeconds(this), 0.f, OverTime_2);
+		} while (WorldDeltaSeconds < OverTime_2);
+	}
+	else
+		SetActorLocationAndRotation(NewTransform_2.GetLocation(), NewTransform_2.GetRotation().Rotator(), true, &OutSweepHitResult, ETeleportType::None);
 
 	if (CharacterData->bMantleDisabledCollision)
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
 	bMantle = false;
+
 	ServerChangeMovementState(EMovementState::Ground);
-}
-
-void APHCharacter::ChangeMaxSpeed()
-{
-	if (!CharacterData)
-		return;
-
-	switch (MovementState)
-	{
-	case EMovementState::Climbing:
-		GetCharacterMovement()->MaxFlySpeed = CharacterData->MaxClimbingSpeed;
-		return;
-	case EMovementState::Falling:
-	case EMovementState::Gliding:
-	case EMovementState::Ground:
-		GetCharacterMovement()->MaxWalkSpeed = bSprinting ? CharacterData->MaxSprintSpeed : (bWalking ? CharacterData->MaxWalkingSpeed : CharacterData->MaxRunningSpeed);
-		return;
-	case EMovementState::Swimming:
-		GetCharacterMovement()->MaxSwimSpeed = bSprinting ? CharacterData->SwimmingSprintSpeed : CharacterData->MaxSwimmingSpeed;
-	}
+	ChangeMovementState(EMovementState::Ground);
 }
 
 void APHCharacter::SwitchRotationSetting()
@@ -407,5 +439,150 @@ void APHCharacter::TogglePerspective()
 
 void APHCharacter::Jumping()
 {
+	if (bBlockedMovement)
+		return;
 
+	bBlockedClimbing = false;
+
+	switch (MovementState)
+	{
+	case EMovementState::Climbing:
+	{
+		if (!bJumpingToClimb)
+			CheckJumpingToClimb();
+		return;
+	}
+	case EMovementState::Falling:
+	{
+		if (!bSlidingCrouched && bSlidingOnSlope)
+		{
+			FFindFloorResult OutFloorResult;
+			GetCharacterMovement()->FindFloor(GetCapsuleComponent()->GetComponentLocation(), OutFloorResult, true, nullptr);
+			FVector LaunchVelocity = OutFloorResult.HitResult.Normal * GetCharacterMovement()->JumpZVelocity * 2.f;
+
+			ServerJumpWhileSlidingOnSlope(LaunchVelocity);
+			JumpWhileSlidingOnSlope(LaunchVelocity);
+		}
+		else if (!bSlidingCrouched && CanGlide())
+		{
+			ServerChangeMovementState(EMovementState::Gliding);
+			ChangeMovementState(EMovementState::Gliding);
+		}
+		return;
+	}
+	case EMovementState::Gliding:
+	{
+		ServerChangeMovementState(EMovementState::Falling);
+		ChangeMovementState(EMovementState::Falling);
+		return;
+	}
+	case EMovementState::Ground:
+		Jump();
+	}
+}
+
+void APHCharacter::CheckJumpingToClimb()
+{
+	if (!CharacterData)
+		return;
+
+	float ForwardAxisValue = GetInputAxisValue(TEXT("MoveForward"));
+	float RightAxisValue = GetInputAxisValue(TEXT("MoveRight"));
+
+	if (!CharacterData->bDirectionalJumpOff && ForwardAxisValue < 0.f && UKismetMathLibrary::Abs(ForwardAxisValue) > UKismetMathLibrary::Abs(RightAxisValue))
+	{
+		JumpOffWhileClimbing(FVector(-1.f, 0.f, 0.f));
+		ServerJumpOffWhileClimbing(FVector(-1.f, 0.f, 0.f));
+		return;
+	}
+
+	float MoveForward = CharacterData->bDirectionalJumpOff ? ForwardAxisValue : UKismetMathLibrary::Max(0.f, ForwardAxisValue);
+	float AbsMoveForward = UKismetMathLibrary::Abs(MoveForward);
+	float AbsMoveRight = UKismetMathLibrary::Abs(RightAxisValue);
+	float MapRangeClampedX = UKismetMathLibrary::MapRangeClamped(AbsMoveForward, 0.f, UKismetMathLibrary::Max(AbsMoveForward, AbsMoveRight), 0.f, 1.f);
+	float MapRangeClampedY = UKismetMathLibrary::MapRangeClamped(AbsMoveRight, 0.f, UKismetMathLibrary::Max(AbsMoveForward, AbsMoveRight), 0.f, 1.f);
+	
+	FVector JumpOrientation(MoveForward / AbsMoveForward * MapRangeClampedX, RightAxisValue / AbsMoveRight * MapRangeClampedY, 0.f);
+	JumpOrientation = UKismetMathLibrary::Vector_IsNearlyZero(JumpOrientation, 0.001f) ? FVector(1.f, 0.f, 0.f) : JumpOrientation;
+
+	JumpToClimb(JumpOrientation);
+	ServerJumpToClimb(JumpOrientation);
+}
+
+void APHCharacter::JumpToClimb(const FVector& JumpOrientation)
+{
+
+}
+
+void APHCharacter::ServerJumpToClimb_Implementation(const FVector& JumpOrientation)
+{
+	MulticastJumpToClimb(JumpOrientation);
+}
+
+void APHCharacter::MulticastJumpToClimb_Implementation(const FVector& JumpOrientation)
+{
+	if (!IsLocallyControlled())
+		JumpToClimb(JumpOrientation);
+}
+
+void APHCharacter::JumpOffWhileClimbing(const FVector& JumpOrientation)
+{
+
+}
+
+void APHCharacter::ServerJumpOffWhileClimbing_Implementation(const FVector& JumpOrientation)
+{
+	MulticastJumpOffWhileClimbing(JumpOrientation);
+}
+
+void APHCharacter::MulticastJumpOffWhileClimbing_Implementation(const FVector& JumpOrientation)
+{
+	if (!IsLocallyControlled())
+		JumpOffWhileClimbing(JumpOrientation);
+}
+
+void APHCharacter::JumpWhileSlidingOnSlope(const FVector& LaunchVelocity)
+{
+	bSlidingOnSlope = false;
+	LaunchCharacter(LaunchVelocity, false, false);
+}
+
+void APHCharacter::ServerJumpWhileSlidingOnSlope_Implementation(const FVector& LaunchVelocity)
+{
+	MulticastJumpWhileSlidingOnSlope(LaunchVelocity);
+}
+
+void APHCharacter::MulticastJumpWhileSlidingOnSlope_Implementation(const FVector& LaunchVelocity)
+{
+	if (!IsLocallyControlled())
+		JumpWhileSlidingOnSlope(LaunchVelocity);
+}
+
+bool APHCharacter::CanGlide()
+{
+	if (!CharacterData)
+		return false;
+
+	FVector BaseLocation = GetCapsuleComponent()->GetComponentLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	FVector StartLocation = BaseLocation + FVector(0.f, 0.f, 10.f);
+	FVector EndLocation = BaseLocation + FVector(0.f, 0.f, CharacterData->GlidingStartHeight);
+	FHitResult OutHit;
+	bool bSucceeded = UKismetSystemLibrary::SphereTraceSingleByProfile(this, StartLocation, EndLocation, GetCapsuleComponent()->GetScaledCapsuleRadius(), TEXT("Pawn"), false, TArray<AActor*>{}, EDrawDebugTrace::None, OutHit, true, FLinearColor::White, FLinearColor::White, 0.f);
+	
+	return !(bSucceeded && GetCharacterMovement()->IsWalkable(OutHit));
+}
+
+void APHCharacter::SpawnGlider()
+{
+	if (MovementState != EMovementState::Gliding || !CharacterData || CharacterData->Glider.IsNull() || !GetWorld())
+		return;
+
+	FVector Location;
+	FRotator Rotation;
+	FActorSpawnParameters ActorSpawnParameters;
+	ActorSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	Glider = GetWorld()->SpawnActor(CharacterData->Glider.Get(), &Location, &Rotation, ActorSpawnParameters);
+	if (Glider)
+		Glider->K2_AttachToComponent(GetMesh(), TEXT("GliderSocket"), EAttachmentRule::KeepRelative, EAttachmentRule::KeepRelative, EAttachmentRule::KeepRelative, true);
 }
