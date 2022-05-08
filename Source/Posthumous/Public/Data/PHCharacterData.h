@@ -37,6 +37,18 @@ class POSTHUMOUS_API UPHCharacterData : public UDataAsset
 	
 public:
 	UPROPERTY(EditDefaultsOnly, Category = "Climbing")
+	float JumpToClimbingAnimPlayRate;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Climbing")
+	float JumpToClimbingInitialDelay;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Climbing")
+	float JumpToClimbingLength;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Climbing")
+	float JumpToClimbingVelocity;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Climbing")
 	float MaxClimbingSpeed;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Falling")
@@ -63,6 +75,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Gliding")
 	FRotator GlidingRotationRate;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Gliding")
+	float GlidingStartHeight;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Ground")
 	FRotator GroundRotationRate;
 
@@ -73,7 +88,7 @@ public:
 	float MaxRunningSpeed;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Ground")
-	float MaxSprintSpeed;
+	float MaxSprintingSpeed;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Ground")
 	float MaxWalkingSpeed;
@@ -95,6 +110,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Swimming")
 	float SwimmingSprintSpeed;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Option")
+	bool bDirectionalJumpOff;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Option")
 	bool bMantleDisabledCollision;
